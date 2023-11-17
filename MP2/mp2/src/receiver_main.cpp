@@ -9,23 +9,54 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <iostream>
+#include <queue>
+#include <cstdio>
+#include <cstring>
+
+#define DATA_SIZE 2000
+#define BUFF_SIZE 600000
+#define TOT_COUNT 300
 
 using namespace std;
 
 struct sockaddr_in si_me, si_other;
 int s, slen;
+int recvbytes;
+char buf[sizeof(packet)];
+struct sockaddr_in sender_addr;
+socklen_t addrlen;
+
+// FIN: 0; DATA: 1; FINACK:2; ACK:3.
+enum PacketType { FIN, DATA, FINACK, ACK };
+
+typedef struct{
+    int 	data_size;
+    int 	seq_num;
+    int     ack_num;
+    PacketType msg_type; //DATA 0 SYN 1 ACK 2 FIN 3 FINACK 4
+    char    data[DATA_SIZE];
+}packet;
+
+void send_ack(int ack_idx, PacketType ack_type) {
+    // Implement the logic to send ACK
+    packet ack;
+    ack.ack_num = ack_idx;
+    ack.msg_type = ack_type;
+
+    if (sendto(s, &ack, sizeof(packet), 0, (sockaddr*)&si_other, (socklen_t)sizeof (si_other))==-1){
+        diep("ACK's sendto()");
+    }
+}
 
 void diep(char *s) {
     perror(s);
     exit(1);
 }
 
-
-
 void reliablyReceive(unsigned short int myUDPport, char* destinationFile) {
     
     slen = sizeof (si_other);
-
+    int ack_index = 0;
 
     if ((s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
         diep("socket");
@@ -39,7 +70,11 @@ void reliablyReceive(unsigned short int myUDPport, char* destinationFile) {
         diep("bind");
 
 
-	/* Now receive data and send acknowledgements */    
+	/* Now receive data and send acknowledgements */
+    FILE* fp = fopen(destinationFile, "wb");  
+    if (fp == NULL){
+        diep("Cannot open the destination file");
+    }
 
     close(s);
 	printf("%s received.", destinationFile);
