@@ -126,6 +126,7 @@ void reliablyReceive(unsigned short int myUDPport, char* destinationFile) {
                 pqueue.pop();
             }
 
+            cout << ack_index << endl;
             send_ack(ack_index, ACK);
         }
     }

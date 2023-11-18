@@ -61,6 +61,7 @@ unsigned short int hostUDPport;
 string filename;
 unsigned long long int bytesToTransfer;
 unsigned long long int all_bytes_read;
+bool read_over; // Flag to indicate that all data in file is read
 
 time_t timer;
 time_t timeout_interval;
@@ -111,8 +112,9 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
     all_bytes_read = 0;
     last_byte_sent = 0;
     last_byte_acked = 0;
+    read_over = false;
+    bytesToTransfer += 0;
 
-    /* TODO: Three handshake */
 
     UserDataHandler();
     while(1)
@@ -121,7 +123,7 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
         if(recvfrom(s, &recv_pkt, sizeof(pkt_t),0,(sockaddr*)&si_other, (socklen_t*) &slen) == -1)
             diep("Recv fail");
         // If receive last ack, finish
-        if(recv_pkt.ack_num == bytesToTransfer)
+        if(read_over && recv_pkt.ack_num == all_bytes_read)
         {
             finish();
             break;
@@ -143,24 +145,25 @@ void UserDataHandler(){
     // Enqueue messages
 
     char buf[DATA_SIZE];
-    int cnt = 0;
     queue<pkt_t> send_queue = {}; // Packets to be sent
     while(cwnd - pkt_queue.size() * DATA_SIZE >= DATA_SIZE && !feof(fp))
     {
         int bytes_to_read = min((long_t) DATA_SIZE, bytesToTransfer - all_bytes_read);
 
         int bytes_read = fread(buf, sizeof(char), bytes_to_read, fp);
+        cout << all_bytes_read << "  " << bytes_read << endl;
         if(bytes_read == 0) {
+            cout << "SHOULD STOP" << endl;
+            read_over = true;
             break;
         }
-        all_bytes_read += bytes_read;
 
         // Enqueue new packets
-        pkt_t new_pkt = {bytes_read,cw_base + cnt * DATA_SIZE,0,DATA,0};
+        pkt_t new_pkt = {bytes_read, all_bytes_read ,0,DATA,0};
         memcpy(new_pkt.data, &buf, bytes_read);
         pkt_queue.push(new_pkt);
         send_queue.push(new_pkt);
-        cnt++;
+        all_bytes_read += bytes_read;
     }
 
     // Transmit based on CW
