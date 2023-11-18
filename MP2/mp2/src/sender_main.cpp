@@ -31,7 +31,7 @@ void diep(string s) {
 }
 
 /* Marcos */
-#define DATA_SIZE 100
+#define DATA_SIZE 10
 
 enum PacketType { FIN, DATA, FINACK, ACK };
 enum State {SLOW_START, CONGESTION_AVOIDANCE, FAST_RECOVERY};
@@ -70,8 +70,8 @@ time_t DevRTT;
 
 queue<pkt_t> pkt_queue; // Packets that have received ack
 long_t cw_base;
-long_t cwnd;
-long_t sst;
+float cwnd;
+float sst;
 State state;
 int dupack;
 long_t last_byte_sent;
@@ -145,7 +145,6 @@ void UserDataHandler(){
     char buf[DATA_SIZE];
     int cnt = 0;
     queue<pkt_t> send_queue = {}; // Packets to be sent
-    cout << "CW_BASE:" << cw_base << endl;
     while(cwnd - pkt_queue.size() * DATA_SIZE >= DATA_SIZE && !feof(fp))
     {
         int bytes_to_read = min((long_t) DATA_SIZE, bytesToTransfer - all_bytes_read);
@@ -169,7 +168,6 @@ void UserDataHandler(){
     {
         if (sendto(s, &send_queue.front(), sizeof(pkt_t),0,(sockaddr*)&si_other, (socklen_t)sizeof(si_other)) == -1)
             diep("Send Fail");
-        cout << "SEND:" << send_queue.front().seq_num << endl;
         send_queue.pop();
     }
     
@@ -180,7 +178,12 @@ void UserDataHandler(){
  * ACK Handler (Update RTT, Update CWND, Update FSM of Congestion Control, Handle Duplicated ACK)
  */
 void ACKHandler(pkt_t ack){
-    print_pkt(ack);
+    // print_pkt(ack);
+    // cout << "state: " << state << 
+    //     " cw_base: " << cw_base <<
+    //     " cwnd: " << cwnd << 
+    //     " dupack: " << dupack << endl;
+
 
     if(state == SLOW_START) {
         if(ack.ack_num < cw_base)
@@ -215,7 +218,7 @@ void ACKHandler(pkt_t ack){
             return;
         }
         // Receive new ack
-        cwnd += DATA_SIZE * DATA_SIZE / cwnd;
+        cwnd += DATA_SIZE * DATA_SIZE / ceil(cwnd);
         last_byte_acked = ack.ack_num;
         dupack = 0;
         dequeue_on_new_ack(ack);

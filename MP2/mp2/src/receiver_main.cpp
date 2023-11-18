@@ -13,7 +13,7 @@
 #include <cstdio>
 #include <cstring>
 
-#define DATA_SIZE 100
+#define DATA_SIZE 10
 #define BUFF_SIZE 1000
 
 using namespace std;
@@ -102,15 +102,16 @@ void reliablyReceive(unsigned short int myUDPport, char* destinationFile) {
             // receive duplicated pkt.
             if (recv_pkt.seq_num < ack_index){
                 cout << "receive duplicated pkt." << endl;
+                send_ack(ack_index, ACK);
                 continue;
             }
             // receive out of order pkt
             if (recv_pkt.seq_num > ack_index){
-                if (pqueue.size() < BUFF_SIZE){
+                if (pqueue.size() < BUFF_SIZE)
                     pqueue.push(recv_pkt);
-                } else {
+                else 
                     cout << "Buffer Queue is full" << endl;
-                }
+                send_ack(ack_index, ACK);
                 continue;
             }
             // receive in-order pkt.
