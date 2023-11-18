@@ -31,7 +31,7 @@ void diep(string s) {
 }
 
 /* Marcos */
-#define DATA_SIZE 10
+#define DATA_SIZE 4000
 
 enum PacketType { FIN, DATA, FINACK, ACK };
 enum State {SLOW_START, CONGESTION_AVOIDANCE, FAST_RECOVERY};
@@ -41,18 +41,17 @@ typedef struct{
     int 	data_size;
     long_t 	seq_num;
     long_t     ack_num;
-    PacketType msg_type; //DATA 0 SYN 1 ACK 2 FIN 3 FINACK 4
+    PacketType msg_type; 
     char    data[DATA_SIZE];
 }pkt_t;
 
 /* Function declaration */
 void UserDataHandler();
 void ACKHandler(pkt_t ack);
+void TimeoutHandler();
 void dequeue_on_new_ack(pkt_t ack);
 void finish();
 
-
-void set_slow_start();
 void set_fast_recovery();
 
 /* Variables */
@@ -64,7 +63,7 @@ unsigned long long int all_bytes_read;
 bool read_over; // Flag to indicate that all data in file is read
 
 time_t timer;
-time_t timeout_interval;
+int timeout_interval = 100000;
 time_t EstimatedRTT; // average RTT
 time_t DevRTT;
 
@@ -102,6 +101,12 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
         fprintf(stderr, "inet_aton() failed\n");
         exit(1);
     }
+
+    timeval socket_time;
+    socket_time.tv_sec = 0;
+    socket_time.tv_usec = timeout_interval;
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &socket_time, sizeof(socket_time));
+
 	/* Send data and receive acknowledgements on s*/
     pkt_queue = {};
     cw_base = 0;
@@ -121,7 +126,13 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
     {
         pkt_t recv_pkt;
         if(recvfrom(s, &recv_pkt, sizeof(pkt_t),0,(sockaddr*)&si_other, (socklen_t*) &slen) == -1)
-            diep("Recv fail");
+        {
+            if(errno != EAGAIN || errno != EWOULDBLOCK)
+                diep("Recv fail");
+            else if(!pkt_queue.empty())
+                TimeoutHandler();
+            continue;
+        }
         // If receive last ack, finish
         if(read_over && recv_pkt.ack_num == all_bytes_read)
         {
@@ -151,7 +162,7 @@ void UserDataHandler(){
         int bytes_to_read = min((long_t) DATA_SIZE, bytesToTransfer - all_bytes_read);
 
         int bytes_read = fread(buf, sizeof(char), bytes_to_read, fp);
-        cout << all_bytes_read << "  " << bytes_read << endl;
+        cout << "all bytes read: " << all_bytes_read << " bytes_read: " << bytes_read << endl;
         if(bytes_read == 0) {
             cout << "SHOULD STOP" << endl;
             read_over = true;
@@ -165,6 +176,7 @@ void UserDataHandler(){
         send_queue.push(new_pkt);
         all_bytes_read += bytes_read;
     }
+    
 
     // Transmit based on CW
     while(!send_queue.empty())
@@ -173,7 +185,10 @@ void UserDataHandler(){
             diep("Send Fail");
         send_queue.pop();
     }
-    
+
+    if(all_bytes_read == bytesToTransfer || feof(fp) != 0){
+        read_over = true;
+    }
 
 }
 
@@ -251,9 +266,6 @@ void ACKHandler(pkt_t ack){
     return;
 }
 
-void set_slow_start(){
-
-}
 
 // Shift from slow start or congestion avoidance to fast recovery
 void set_fast_recovery(){
@@ -277,6 +289,14 @@ void dequeue_on_new_ack(pkt_t ack){
  * Timeout Handler (Check Timeout, Resend Package, Update FSM of Congestion Control, Restart the clock)
  */
 void TimeoutHandler(){
+    state = SLOW_START;
+    sst = cwnd / 2;
+    dupack = 0;
+    cwnd = DATA_SIZE;
+    // Retransmit cw_base paket
+    if (sendto(s, &pkt_queue.front(), sizeof(pkt_t),0,(sockaddr*)&si_other, (socklen_t)sizeof(si_other)) == -1)
+        diep("Send Fail");
+
     return;
 }
 
@@ -289,7 +309,15 @@ void finish() {
     pkt_t recv_pkt;
     while(1) {
         if(recvfrom(s, &recv_pkt, sizeof(pkt_t),0,(sockaddr*)&si_other, (socklen_t*) &slen) == -1)
-            diep("Recv fail");
+        {
+            if(errno != EAGAIN || errno != EWOULDBLOCK){
+                diep("recv error");
+            }else{
+                if (sendto(s, &fin_pkt, sizeof(pkt_t),0,(sockaddr*)&si_other, (socklen_t)sizeof(si_other)) == -1)
+                    diep("Send Fail");
+            }
+            continue;
+        }
         if(recv_pkt.msg_type == FINACK)
             return;
     }
