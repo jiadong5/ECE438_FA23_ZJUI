@@ -14,7 +14,7 @@
 #include <cstring>
 
 #define DATA_SIZE 4000
-#define BUFF_SIZE 1000
+#define BUFF_SIZE 3000
 
 using namespace std;
 
@@ -133,7 +133,7 @@ void reliablyReceive(unsigned short int myUDPport, char* destinationFile) {
 
     fclose(fp);
     close(s);
-	printf("%s received.\n", destinationFile);
+    printf("%s received.", destinationFile);
     return;
 }
 
