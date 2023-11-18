@@ -17,6 +17,8 @@
 #include <queue>
 #include <fstream>
 #include <cmath>
+#include <unordered_map>
+#include <fcntl.h>
 
 using namespace std;
 
@@ -51,6 +53,9 @@ void ACKHandler(pkt_t ack);
 void TimeoutHandler();
 void dequeue_on_new_ack(pkt_t ack);
 void finish();
+time_t get_cur_time();
+void update_time_interval(long_t ack_num);
+void retransmit_base();
 
 void set_fast_recovery();
 
@@ -63,9 +68,10 @@ unsigned long long int all_bytes_read;
 bool read_over; // Flag to indicate that all data in file is read
 
 time_t timer;
-int timeout_interval = 100000;
-time_t EstimatedRTT; // average RTT
-time_t DevRTT;
+time_t timeout_interval; // Units in microseconds
+time_t estimate_rtt; // average RTT
+time_t dev_rtt;
+unordered_map<long_t, time_t> time_record; // corresponding ack_num -> send time for every packet
 
 
 queue<pkt_t> pkt_queue; // Packets that have received ack
@@ -102,10 +108,6 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
         exit(1);
     }
 
-    timeval socket_time;
-    socket_time.tv_sec = 0;
-    socket_time.tv_usec = timeout_interval;
-    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &socket_time, sizeof(socket_time));
 
 	/* Send data and receive acknowledgements on s*/
     pkt_queue = {};
@@ -119,7 +121,15 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
     last_byte_acked = 0;
     read_over = false;
     bytesToTransfer += 0;
+    timeout_interval = 1000000;
+    estimate_rtt = timeout_interval; // average RTT
+    dev_rtt = 0;
 
+    // timeval socket_time;
+    // socket_time.tv_sec = 0;
+    // socket_time.tv_usec = 100000;
+    // setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &socket_time, sizeof(socket_time));
+    fcntl(s, F_SETFL, O_NONBLOCK);
 
     UserDataHandler();
     while(1)
@@ -183,6 +193,7 @@ void UserDataHandler(){
     {
         if (sendto(s, &send_queue.front(), sizeof(pkt_t),0,(sockaddr*)&si_other, (socklen_t)sizeof(si_other)) == -1)
             diep("Send Fail");
+        time_record[send_queue.front().seq_num + send_queue.front().data_size] = get_cur_time();
         send_queue.pop();
     }
 
@@ -215,6 +226,7 @@ void ACKHandler(pkt_t ack){
             return;
         }
         // Receive new ack
+        update_time_interval(ack.ack_num);
         cwnd += DATA_SIZE;
         last_byte_acked = ack.ack_num;
         if(cwnd >= sst)
@@ -236,6 +248,7 @@ void ACKHandler(pkt_t ack){
             return;
         }
         // Receive new ack
+        update_time_interval(ack.ack_num);
         cwnd += DATA_SIZE * DATA_SIZE / ceil(cwnd);
         last_byte_acked = ack.ack_num;
         dupack = 0;
@@ -253,6 +266,7 @@ void ACKHandler(pkt_t ack){
             UserDataHandler();
         }
         // Receive new ack
+        update_time_interval(ack.ack_num);
         last_byte_acked = ack.ack_num;
         state = CONGESTION_AVOIDANCE;
         dupack = 0;
@@ -273,9 +287,7 @@ void set_fast_recovery(){
     sst = cwnd / 2;
     cwnd = sst +  3 * DATA_SIZE;
     state = FAST_RECOVERY;
-    // Retransmit cw_base paket
-    if (sendto(s, &pkt_queue.front(), sizeof(pkt_t),0,(sockaddr*)&si_other, (socklen_t)sizeof(si_other)) == -1)
-        diep("Send Fail");
+    retransmit_base();
 }
 
 void dequeue_on_new_ack(pkt_t ack){
@@ -289,14 +301,15 @@ void dequeue_on_new_ack(pkt_t ack){
  * Timeout Handler (Check Timeout, Resend Package, Update FSM of Congestion Control, Restart the clock)
  */
 void TimeoutHandler(){
-    state = SLOW_START;
-    sst = cwnd / 2;
-    dupack = 0;
-    cwnd = DATA_SIZE;
-    // Retransmit cw_base paket
-    if (sendto(s, &pkt_queue.front(), sizeof(pkt_t),0,(sockaddr*)&si_other, (socklen_t)sizeof(si_other)) == -1)
-        diep("Send Fail");
-
+    pkt_t base_pkt = pkt_queue.front();
+    if(get_cur_time() - time_record[base_pkt.seq_num + base_pkt.data_size] >= timeout_interval) {
+        state = SLOW_START;
+        sst = cwnd / 2;
+        dupack = 0;
+        cwnd = DATA_SIZE;
+        // Retransmit cw_base paket
+        retransmit_base();
+    }
     return;
 }
 
@@ -321,6 +334,34 @@ void finish() {
         if(recv_pkt.msg_type == FINACK)
             return;
     }
+}
+
+void retransmit_base()
+{
+    if (sendto(s, &pkt_queue.front(), sizeof(pkt_t),0,(sockaddr*)&si_other, (socklen_t)sizeof(si_other)) == -1)
+        diep("Send Fail");
+    time_record[pkt_queue.front().seq_num + pkt_queue.front().data_size] = get_cur_time();
+}
+
+time_t get_cur_time()
+{
+    struct timeval cur_time;
+    gettimeofday(&cur_time, nullptr);
+    time_t microseconds = cur_time.tv_sec * 1000000 + cur_time.tv_usec;
+    return microseconds;
+}
+
+// Only called after (first) ack
+void update_time_interval(long_t ack_num)
+{
+    time_t sample_rtt = get_cur_time() - time_record[ack_num];
+    if(sample_rtt <= 0)
+        diep("sample rtt wrong");
+    estimate_rtt = (time_t)(0.875 * estimate_rtt + 0.125 * sample_rtt);
+    dev_rtt = (time_t)(0.75 * dev_rtt + 0.25 * abs(sample_rtt - estimate_rtt));
+    timeout_interval = estimate_rtt + 4 * dev_rtt;
+
+    time_record.erase(ack_num);
 }
 /*
  * main function.
