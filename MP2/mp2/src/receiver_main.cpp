@@ -13,7 +13,7 @@
 #include <cstdio>
 #include <cstring>
 
-#define DATA_SIZE 2000
+#define DATA_SIZE 4000
 #define BUFF_SIZE 1000
 
 using namespace std;
