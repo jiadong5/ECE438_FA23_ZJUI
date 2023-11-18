@@ -146,7 +146,7 @@ void UserDataHandler(){
 
     char buf[DATA_SIZE];
     queue<pkt_t> send_queue = {}; // Packets to be sent
-    while(cwnd - pkt_queue.size() * DATA_SIZE >= DATA_SIZE && !feof(fp))
+    while(cwnd - pkt_queue.size() * DATA_SIZE >= DATA_SIZE && !read_over)
     {
         int bytes_to_read = min((long_t) DATA_SIZE, bytesToTransfer - all_bytes_read);
 
