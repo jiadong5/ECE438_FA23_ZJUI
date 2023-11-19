@@ -33,7 +33,7 @@ void diep(string s) {
 }
 
 /* Marcos */
-#define DATA_SIZE 4000
+#define DATA_SIZE 14000
 
 enum PacketType { FIN, DATA, FINACK, ACK };
 enum State {SLOW_START, CONGESTION_AVOIDANCE, FAST_RECOVERY};
@@ -328,6 +328,7 @@ void finish() {
     pkt_t fin_pkt = {0,0,0,FIN,0};
     if (sendto(s, &fin_pkt, sizeof(pkt_t),0,(sockaddr*)&si_other, (socklen_t)sizeof(si_other)) == -1)
         diep("Send Fail");
+    time_t fin_send_time = get_cur_time();
 
     pkt_t recv_pkt;
     while(1) {
@@ -336,8 +337,11 @@ void finish() {
             if(errno != EAGAIN || errno != EWOULDBLOCK){
                 diep("recv error");
             }else{
-                if (sendto(s, &fin_pkt, sizeof(pkt_t),0,(sockaddr*)&si_other, (socklen_t)sizeof(si_other)) == -1)
-                    diep("Send Fail");
+                if(get_cur_time() - fin_send_time >= timeout_interval) {
+                    if (sendto(s, &fin_pkt, sizeof(pkt_t),0,(sockaddr*)&si_other, (socklen_t)sizeof(si_other)) == -1)
+                        diep("Send Fail");
+                    fin_send_time = get_cur_time();
+                }
             }
             continue;
         }
