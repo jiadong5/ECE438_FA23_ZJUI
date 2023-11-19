@@ -47,6 +47,11 @@ typedef struct{
     char    data[DATA_SIZE];
 }pkt_t;
 
+typedef struct{
+    time_t send_time;
+    bool retransmit; // If this packet is a retransmitted packet
+}record_t;
+
 /* Function declaration */
 void UserDataHandler();
 void ACKHandler(pkt_t ack);
@@ -71,7 +76,7 @@ time_t timer;
 time_t timeout_interval; // Units in microseconds
 time_t estimate_rtt; // average RTT
 time_t dev_rtt;
-unordered_map<long_t, time_t> time_record; // corresponding ack_num -> send time for every packet
+unordered_map<long_t, record_t> time_record; // corresponding ack_num -> send time for every packet
 
 
 queue<pkt_t> pkt_queue; // Packets that have received ack
@@ -139,8 +144,10 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
         {
             if(errno != EAGAIN || errno != EWOULDBLOCK)
                 diep("Recv fail");
-            else if(!pkt_queue.empty())
+            else if(!pkt_queue.empty()) {
+                // cout << "timeout interval: " << timeout_interval << endl;
                 TimeoutHandler();
+            }
             continue;
         }
         // If receive last ack, finish
@@ -172,9 +179,8 @@ void UserDataHandler(){
         int bytes_to_read = min((long_t) DATA_SIZE, bytesToTransfer - all_bytes_read);
 
         int bytes_read = fread(buf, sizeof(char), bytes_to_read, fp);
-        cout << "all bytes read: " << all_bytes_read << " bytes_read: " << bytes_read << endl;
+        // cout << "all bytes read: " << all_bytes_read << " bytes_read: " << bytes_read << endl;
         if(bytes_read == 0) {
-            cout << "SHOULD STOP" << endl;
             read_over = true;
             break;
         }
@@ -193,7 +199,7 @@ void UserDataHandler(){
     {
         if (sendto(s, &send_queue.front(), sizeof(pkt_t),0,(sockaddr*)&si_other, (socklen_t)sizeof(si_other)) == -1)
             diep("Send Fail");
-        time_record[send_queue.front().seq_num + send_queue.front().data_size] = get_cur_time();
+        time_record[send_queue.front().seq_num + send_queue.front().data_size] = {get_cur_time(),false};
         send_queue.pop();
     }
 
@@ -264,6 +270,7 @@ void ACKHandler(pkt_t ack){
         {
             cwnd += DATA_SIZE;
             UserDataHandler();
+            return;
         }
         // Receive new ack
         update_time_interval(ack.ack_num);
@@ -302,7 +309,10 @@ void dequeue_on_new_ack(pkt_t ack){
  */
 void TimeoutHandler(){
     pkt_t base_pkt = pkt_queue.front();
-    if(get_cur_time() - time_record[base_pkt.seq_num + base_pkt.data_size] >= timeout_interval) {
+    if(get_cur_time() - time_record[base_pkt.seq_num + base_pkt.data_size].send_time >= timeout_interval) {
+        cout << "===TIMEOUT===" << endl;
+        cout << "timeout interval: " << timeout_interval << endl;
+        cout << "all bytes read: " << all_bytes_read << endl;
         state = SLOW_START;
         sst = cwnd / 2;
         dupack = 0;
@@ -340,7 +350,7 @@ void retransmit_base()
 {
     if (sendto(s, &pkt_queue.front(), sizeof(pkt_t),0,(sockaddr*)&si_other, (socklen_t)sizeof(si_other)) == -1)
         diep("Send Fail");
-    time_record[pkt_queue.front().seq_num + pkt_queue.front().data_size] = get_cur_time();
+    time_record[pkt_queue.front().seq_num + pkt_queue.front().data_size] = {get_cur_time(), true};
 }
 
 time_t get_cur_time()
@@ -354,8 +364,14 @@ time_t get_cur_time()
 // Only called after (first) ack
 void update_time_interval(long_t ack_num)
 {
-    time_t sample_rtt = get_cur_time() - time_record[ack_num];
-    if(sample_rtt <= 0)
+    if(time_record[ack_num].retransmit == true) 
+    {
+        time_record.erase(ack_num);
+        return;
+    }
+    time_t sample_rtt = get_cur_time() - time_record[ack_num].send_time;
+    cout << "state: " << state << " sample_rtt: " << sample_rtt << " sendtime: " << time_record[ack_num].send_time << " timeout interval: " << timeout_interval << " ack_num : " << ack_num << " cw_base: " << cw_base << endl;
+    if(sample_rtt <= 0) 
         diep("sample rtt wrong");
     estimate_rtt = (time_t)(0.875 * estimate_rtt + 0.125 * sample_rtt);
     dev_rtt = (time_t)(0.75 * dev_rtt + 0.25 * abs(sample_rtt - estimate_rtt));

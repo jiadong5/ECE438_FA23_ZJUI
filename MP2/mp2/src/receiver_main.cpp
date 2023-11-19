@@ -14,7 +14,6 @@
 #include <cstring>
 
 #define DATA_SIZE 4000
-#define BUFF_SIZE 1000
 
 using namespace std;
 
@@ -49,7 +48,6 @@ struct compare {
     }
 };
 
-char buf[sizeof(pkt_t)];
 priority_queue<pkt_t, vector<pkt_t>, compare> pqueue;
 
 void send_ack(int ack_idx, PacketType ack_type) {
@@ -107,10 +105,7 @@ void reliablyReceive(unsigned short int myUDPport, char* destinationFile) {
             }
             // receive out of order pkt
             if (recv_pkt.seq_num > ack_index){
-                if (pqueue.size() < BUFF_SIZE)
-                    pqueue.push(recv_pkt);
-                else 
-                    cout << "Buffer Queue is full" << endl;
+                pqueue.push(recv_pkt);
                 send_ack(ack_index, ACK);
                 continue;
             }
@@ -125,7 +120,6 @@ void reliablyReceive(unsigned short int myUDPport, char* destinationFile) {
                 ack_index += pkt.data_size;
                 pqueue.pop();
             }
-
             cout << ack_index << endl;
             send_ack(ack_index, ACK);
         }
