@@ -1,4 +1,3 @@
-/* Author: Jiadong Hong */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,43 +24,39 @@ using namespace std;
 struct sockaddr_in si_other;
 int s, slen;
 FILE *fp;
-
-
 void diep(string s) {
     perror(s.c_str());
     exit(1);
 }
-
 /* Marcos */
 #define DATA_SIZE 14000
 
-enum PacketType { FIN, DATA, FINACK, ACK };
-enum State {SLOW_START, CONGESTION_AVOIDANCE, FAST_RECOVERY};
+/* structs and typedef */
+enum pkt_type_t { FIN, DATA, FINACK, ACK };
+enum state_t {SLOW_START, CONGESTION_AVOIDANCE, FAST_RECOVERY};
 typedef unsigned long long int long_t;
-/* Structs  */
 typedef struct{
     int 	data_size;
     long_t 	seq_num;
     long_t     ack_num;
-    PacketType msg_type; 
+    pkt_type_t msg_type; 
     char    data[DATA_SIZE];
 }pkt_t;
-
 typedef struct{
     time_t send_time;
     bool retransmit; // If this packet is a retransmitted packet
 }record_t;
 
 /* Function declaration */
-void UserDataHandler();
-void ACKHandler(pkt_t ack);
-void TimeoutHandler();
+void user_data_handler();
+void ack_handler(pkt_t ack);
+void timeout_handler();
+void finish_hander();
+/* Auxiliary functions */
 void dequeue_on_new_ack(pkt_t ack);
-void finish();
 time_t get_cur_time();
 void update_time_interval(long_t ack_num);
 void retransmit_base();
-
 void set_fast_recovery();
 
 /* Variables */
@@ -72,29 +67,17 @@ unsigned long long int bytesToTransfer;
 unsigned long long int all_bytes_read;
 bool read_over; // Flag to indicate that all data in file is read
 
-time_t timer;
 time_t timeout_interval; // Units in microseconds
 time_t estimate_rtt; // average RTT
 time_t dev_rtt;
 unordered_map<long_t, record_t> time_record; // corresponding ack_num -> send time for every packet
 
-
 queue<pkt_t> pkt_queue; // Packets that have received ack
 long_t cw_base;
 float cwnd;
 float sst;
-State state;
+state_t state;
 int dupack;
-long_t last_byte_sent;
-long_t last_byte_acked;
-
-void print_pkt(pkt_t pkt)
-{
-    cout << "type: " << pkt.msg_type << " seq_num: "  << pkt.seq_num <<
-    " ack_num: " << pkt.ack_num << " data_size: " << pkt.data_size << endl;
-}
-
-
 
 void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* filename, unsigned long long int bytesToTransfer) {
     // Open the file
@@ -113,7 +96,6 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
         exit(1);
     }
 
-
 	/* Send data and receive acknowledgements on s*/
     pkt_queue = {};
     cw_base = 0;
@@ -122,21 +104,15 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
     state = SLOW_START;
     dupack = 0;
     all_bytes_read = 0;
-    last_byte_sent = 0;
-    last_byte_acked = 0;
     read_over = false;
     bytesToTransfer += 0;
     timeout_interval = 1000000;
     estimate_rtt = timeout_interval; // average RTT
     dev_rtt = 0;
 
-    // timeval socket_time;
-    // socket_time.tv_sec = 0;
-    // socket_time.tv_usec = 100000;
-    // setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &socket_time, sizeof(socket_time));
     fcntl(s, F_SETFL, O_NONBLOCK);
 
-    UserDataHandler();
+    user_data_handler();
     while(1)
     {
         pkt_t recv_pkt;
@@ -145,18 +121,17 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
             if(errno != EAGAIN || errno != EWOULDBLOCK)
                 diep("Recv fail");
             else if(!pkt_queue.empty()) {
-                // cout << "timeout interval: " << timeout_interval << endl;
-                TimeoutHandler();
+                timeout_handler();
             }
             continue;
         }
         // If receive last ack, finish
         if(read_over && recv_pkt.ack_num == all_bytes_read)
         {
-            finish();
+            finish_hander();
             break;
         }
-        ACKHandler(recv_pkt);
+        ack_handler(recv_pkt);
     }
 
     printf("Closing the socket\n");
@@ -166,20 +141,13 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 
 }
 
-/*
- * User Data Handler (Make Package, Check Window Size, Send Data via UDP)
- */
-void UserDataHandler(){
-    // Enqueue messages
-
+void user_data_handler(){
     char buf[DATA_SIZE];
     queue<pkt_t> send_queue = {}; // Packets to be sent
     while(cwnd - pkt_queue.size() * DATA_SIZE >= DATA_SIZE && !read_over)
     {
         int bytes_to_read = min((long_t) DATA_SIZE, bytesToTransfer - all_bytes_read);
-
         int bytes_read = fread(buf, sizeof(char), bytes_to_read, fp);
-        // cout << "all bytes read: " << all_bytes_read << " bytes_read: " << bytes_read << endl;
         if(bytes_read == 0) {
             read_over = true;
             break;
@@ -193,7 +161,6 @@ void UserDataHandler(){
         all_bytes_read += bytes_read;
     }
     
-
     // Transmit based on CW
     while(!send_queue.empty())
     {
@@ -209,17 +176,7 @@ void UserDataHandler(){
 
 }
 
-/*
- * ACK Handler (Update RTT, Update CWND, Update FSM of Congestion Control, Handle Duplicated ACK)
- */
-void ACKHandler(pkt_t ack){
-    // print_pkt(ack);
-    // cout << "state: " << state << 
-    //     " cw_base: " << cw_base <<
-    //     " cwnd: " << cwnd << 
-    //     " dupack: " << dupack << endl;
-
-
+void ack_handler(pkt_t ack){
     if(state == SLOW_START) {
         if(ack.ack_num < cw_base)
             return;
@@ -234,12 +191,11 @@ void ACKHandler(pkt_t ack){
         // Receive new ack
         update_time_interval(ack.ack_num);
         cwnd += DATA_SIZE;
-        last_byte_acked = ack.ack_num;
         if(cwnd >= sst)
             state = CONGESTION_AVOIDANCE;
         dupack = 0;
         dequeue_on_new_ack(ack);
-        UserDataHandler();
+        user_data_handler();
         return;
     }
     if(state == CONGESTION_AVOIDANCE) {
@@ -255,11 +211,10 @@ void ACKHandler(pkt_t ack){
         }
         // Receive new ack
         update_time_interval(ack.ack_num);
-        cwnd += DATA_SIZE * DATA_SIZE / ceil(cwnd);
-        last_byte_acked = ack.ack_num;
+        cwnd += DATA_SIZE * DATA_SIZE / floor(cwnd);
         dupack = 0;
         dequeue_on_new_ack(ack);
-        UserDataHandler();
+        user_data_handler();
         return;
     }
     if(state == FAST_RECOVERY) {
@@ -269,21 +224,18 @@ void ACKHandler(pkt_t ack){
         if(ack.ack_num == cw_base)
         {
             cwnd += DATA_SIZE;
-            UserDataHandler();
+            user_data_handler();
             return;
         }
         // Receive new ack
         update_time_interval(ack.ack_num);
-        last_byte_acked = ack.ack_num;
         state = CONGESTION_AVOIDANCE;
         dupack = 0;
         cwnd = sst;
         dequeue_on_new_ack(ack);
-        UserDataHandler();
-
+        user_data_handler();
         return;
     }
-
     return;
 }
 
@@ -301,18 +253,11 @@ void dequeue_on_new_ack(pkt_t ack){
     cw_base = ack.ack_num;
     while(!pkt_queue.empty() && pkt_queue.front().seq_num != cw_base)
         pkt_queue.pop();
-
 }
 
-/*
- * Timeout Handler (Check Timeout, Resend Package, Update FSM of Congestion Control, Restart the clock)
- */
-void TimeoutHandler(){
+void timeout_handler(){
     pkt_t base_pkt = pkt_queue.front();
     if(get_cur_time() - time_record[base_pkt.seq_num + base_pkt.data_size].send_time >= timeout_interval) {
-        cout << "===TIMEOUT===" << endl;
-        cout << "timeout interval: " << timeout_interval << endl;
-        cout << "all bytes read: " << all_bytes_read << endl;
         state = SLOW_START;
         sst = cwnd / 2;
         dupack = 0;
@@ -324,7 +269,7 @@ void TimeoutHandler(){
 }
 
 
-void finish() {
+void finish_hander() {
     pkt_t fin_pkt = {0,0,0,FIN,0};
     if (sendto(s, &fin_pkt, sizeof(pkt_t),0,(sockaddr*)&si_other, (socklen_t)sizeof(si_other)) == -1)
         diep("Send Fail");
@@ -374,9 +319,7 @@ void update_time_interval(long_t ack_num)
         return;
     }
     time_t sample_rtt = get_cur_time() - time_record[ack_num].send_time;
-    cout << "state: " << state << " sample_rtt: " << sample_rtt << " sendtime: " << time_record[ack_num].send_time << " timeout interval: " << timeout_interval << " ack_num : " << ack_num << " cw_base: " << cw_base << endl;
-    if(sample_rtt <= 0) 
-        diep("sample rtt wrong");
+    // cout << "state: " << state << " sample_rtt: " << sample_rtt << " sendtime: " << time_record[ack_num].send_time << " timeout interval: " << timeout_interval << " ack_num : " << ack_num << " cw_base: " << cw_base << endl;
     estimate_rtt = (time_t)(0.875 * estimate_rtt + 0.125 * sample_rtt);
     dev_rtt = (time_t)(0.75 * dev_rtt + 0.25 * abs(sample_rtt - estimate_rtt));
     timeout_interval = estimate_rtt + 4 * dev_rtt;
