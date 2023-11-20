@@ -29,7 +29,7 @@ struct sockaddr_in sender_addr;
 socklen_t addrlen;
 
 // FIN: 0; DATA: 1; FINACK:2; ACK:3.
-enum PacketType { FIN, DATA, FINACK, ACK };
+enum pkt_type_t { FIN, DATA, FINACK, ACK };
 
 /* This struct is for the priority queue */
 
@@ -38,19 +38,19 @@ typedef struct{
     int 	data_size;
     long_t 	seq_num;
     long_t     ack_num;
-    PacketType msg_type;
+    pkt_type_t msg_type;
     char    data[DATA_SIZE];
 }pkt_t;
 
-struct compare {
+struct is_greater {
     bool operator()(pkt_t a, pkt_t b) {
         return  a.seq_num > b.seq_num; 
     }
 };
 
-priority_queue<pkt_t, vector<pkt_t>, compare> pqueue;
+priority_queue<pkt_t, vector<pkt_t>, is_greater> pkt_queue;
 
-void send_ack(int ack_idx, PacketType ack_type) {
+void send_ack(int ack_idx, pkt_type_t ack_type) {
     // Implement the logic to send ACK
     pkt_t ack;
     ack.ack_num = ack_idx;
@@ -60,9 +60,8 @@ void send_ack(int ack_idx, PacketType ack_type) {
     ack.seq_num = 0;
     memset(&ack.data, 0,DATA_SIZE);
 
-    if (sendto(s, &ack, sizeof(pkt_t), 0, (sockaddr*)&si_other, (socklen_t)sizeof (si_other))==-1){
-        diep("ACK's sendto()");
-    }
+    if (sendto(s, &ack, sizeof(pkt_t), 0, (sockaddr*)&si_other, (socklen_t)sizeof (si_other))==-1)
+        diep("send fail");
 }
 
 void reliablyReceive(unsigned short int myUDPport, char* destinationFile) {
@@ -82,7 +81,7 @@ void reliablyReceive(unsigned short int myUDPport, char* destinationFile) {
     if (fp == NULL)
         diep("Cannot open the destination file");
 
-    int ack_index = 0;
+    int ack_base = 0;
 
     while (true){
         pkt_t recv_pkt;
@@ -91,37 +90,37 @@ void reliablyReceive(unsigned short int myUDPport, char* destinationFile) {
 
         // Finish receiving when FIN. End Transmission.
         if (recv_pkt.msg_type == FIN){
-            cout << "receiving FIN" <<endl;
-            send_ack(ack_index, FINACK);
+            cout << "==FIN==" <<endl;
+            send_ack(ack_base, FINACK);
             break;
         }
 
         if (recv_pkt.msg_type == DATA){
             // receive duplicated pkt.
-            if (recv_pkt.seq_num < ack_index){
+            if (recv_pkt.seq_num < ack_base){
                 cout << "receive duplicated pkt." << endl;
-                send_ack(ack_index, ACK);
+                send_ack(ack_base, ACK);
                 continue;
             }
             // receive out of order pkt
-            if (recv_pkt.seq_num > ack_index){
-                pqueue.push(recv_pkt);
-                send_ack(ack_index, ACK);
+            if (recv_pkt.seq_num > ack_base){
+                pkt_queue.push(recv_pkt);
+                send_ack(ack_base, ACK);
                 continue;
             }
             // receive in-order pkt.
             // Write data to file.
             fwrite(recv_pkt.data, sizeof(char), recv_pkt.data_size, fp);
-            ack_index += recv_pkt.data_size;
+            ack_base += recv_pkt.data_size;
             // only in order and in queue will be written to file.
-            while (!pqueue.empty() && pqueue.top().seq_num == ack_index){
-                pkt_t pkt = pqueue.top();
+            while (!pkt_queue.empty() && pkt_queue.top().seq_num == ack_base){
+                pkt_t pkt = pkt_queue.top();
                 fwrite(pkt.data, sizeof(char), pkt.data_size, fp);
-                ack_index += pkt.data_size;
-                pqueue.pop();
+                ack_base += pkt.data_size;
+                pkt_queue.pop();
             }
-            cout << ack_index << endl;
-            send_ack(ack_index, ACK);
+            cout << ack_base << endl;
+            send_ack(ack_base, ACK);
         }
     }
 
