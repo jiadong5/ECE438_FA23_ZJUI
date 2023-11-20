@@ -29,7 +29,7 @@ void diep(string s) {
     exit(1);
 }
 /* Marcos */
-#define DATA_SIZE 14000
+#define DATA_SIZE 4000
 
 /* structs and typedef */
 enum pkt_type_t { FIN, DATA, FINACK, ACK };
