@@ -364,7 +364,7 @@ int main(int argc, char** argv) {
         
         if (!outFile.is_open()) {
             std::cerr << "Error: Could not open or create file for writing." << std::endl;
-            return 1; // 返回非零值表示错误
+            return 1;
         }
     }
 
