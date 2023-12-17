@@ -8,6 +8,7 @@
 #include <limits>
 #include <stack>
 #include <functional>
+#include <string>
 
 using namespace std;
 
@@ -267,36 +268,41 @@ public:
         return;
     }
 
-    void printForwardingTable(int src) {
+    void printForwardingTable(int src, ofstream& outFile) {
+        dijkstra(src);
         int n = distances.size();
         for (int i = 1; i < n; i ++) {
             if (i == src){
                 cout << i << " " << i << " " << "0" << endl;
+                outFile << i << " " << i << " " << "0" << endl;
             } else {
                 if (distances[i] == INF) {
                     continue;
                 } else {
                     cout << i << " ";
+                    outFile << i << " ";
                     int current = i;
                     while (predecessors[current] != src) {
                         current = predecessors[current];
                     }
                     cout << current << " " << distances[i] << endl;
+                    outFile << current << " " << distances[i] << endl;
                 }
             }
         }
         return;
     }
 
-    void printMsgTrans(){
+    void printMsgTrans(ofstream& outFile){
         MessagelinkedListNode* currentMsgInfo = msgInfo;
         while (currentMsgInfo != nullptr){
             dijkstra(currentMsgInfo->src);
-            int n = distances.size();
             if (distances[currentMsgInfo->dest] == INF) {
                 cout << "from " << currentMsgInfo->src << " to " << currentMsgInfo->dest << " cost infinite hops unreachable message " << currentMsgInfo->message << endl;
+                outFile << "from " << currentMsgInfo->src << " to " << currentMsgInfo->dest << " cost infinite hops unreachable message " << currentMsgInfo->message << endl;
             } else {
                 cout << "from " << currentMsgInfo->src << " to " << currentMsgInfo->dest << " cost " << distances[currentMsgInfo->dest] << " hops ";
+                outFile << "from " << currentMsgInfo->src << " to " << currentMsgInfo->dest << " cost " << distances[currentMsgInfo->dest] << " hops ";
                 stack<int> path;
                 int current = currentMsgInfo->dest;
                 while (current != -1) {
@@ -305,40 +311,72 @@ public:
                 }
                 while (!path.empty()) {
                     cout << path.top() << " ";
+                    outFile << path.top() << " ";
                     path.pop();
                     if (path.size() == 1){
                         path.pop();
                     }
                 }
                 cout << "message " << currentMsgInfo->message << endl;
+                outFile << "message " << currentMsgInfo->message << endl;
             }
             currentMsgInfo = currentMsgInfo->next;
         }
         return;
     }
+
+    void printTopoChange(ofstream& outFile){
+        for (int i = 1; i < nodes.size(); i++) {
+            printForwardingTable(i, outFile);
+        }
+        printMsgTrans(outFile);
+        linkedListNode* currentTopoChange = topoChangeInfo;
+        while (currentTopoChange != nullptr) {
+            if (currentTopoChange->weight == -999){
+                deleteUndirectedEdge(currentTopoChange->u, currentTopoChange->v);
+            } else {
+                deleteUndirectedEdge(currentTopoChange->u, currentTopoChange->v);
+                addUndirectedEdge(currentTopoChange->u, currentTopoChange->v, currentTopoChange->weight);
+            }
+            for (int i = 1; i < nodes.size(); i++) {
+                printForwardingTable(i, outFile);
+            }
+            printMsgTrans(outFile);
+            currentTopoChange = currentTopoChange->next;
+        }
+        return;
+    }
 };
 
-int main() {
+int main(int argc, char** argv) {
+    //printf("Number of arguments: %d", argc);
+    if (argc != 4) {
+        printf("Usage: ./linkstate topofile messagefile changesfile\n");
+        return -1;
+    }
+
+    // output file.
+    std::string filename = "output.txt";
+    std::ofstream outFile(filename, std::ios::out | std::ios::trunc);
+
+    if (!outFile.is_open()) {
+        outFile.open(filename, std::ios::out);
+        
+        if (!outFile.is_open()) {
+            std::cerr << "Error: Could not open or create file for writing." << std::endl;
+            return 1; // 返回非零值表示错误
+        }
+    }
+
     // Establish Graph and add edges.
+    string topofile(argv[1]);
+    string changesfile(argv[3]);
+    string messagefile(argv[2]);
+
     Graph graph;
-    graph.initGraph("./topofile","./changesfile","./Messagefile");
-    graph.printMsgTrans();
+    graph.initGraph(topofile, changesfile, messagefile);
+    graph.printTopoChange(outFile);
+    outFile.close();
 
     return 0;
 }
-
-
-// int main(int argc, char** argv) {
-//     //printf("Number of arguments: %d", argc);
-//     if (argc != 4) {
-//         printf("Usage: ./linkstate topofile messagefile changesfile\n");
-//         return -1;
-//     }
-
-//     FILE *fpOut;
-//     fpOut = fopen("output.txt", "w");
-//     fclose(fpOut);
-
-
-//     return 0;
-// }
