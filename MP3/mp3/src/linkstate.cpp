@@ -16,7 +16,7 @@ const int INF = numeric_limits<int>::max();
 // Node Structure.
 struct Node {
     int id;
-    vector<pair<int, int>> neighbors;  // 保存邻接节点的 {权重, 目标节点ID} 对
+    vector<pair<int, int>> neighbors;
 
     Node(int _id) : id(_id) {}
 
@@ -291,58 +291,38 @@ public:
     void printMsgTrans(){
         MessagelinkedListNode* currentMsgInfo = msgInfo;
         while (currentMsgInfo != nullptr){
-            
-            // int n = distances.size();
-
-            // for (int i = 1; i < n; ++i) {
-            //     cout << "Shortest distance from node " << start << " to node " << i << " is: ";
-            //     if (distances[i] == INF) {
-            //         cout << "INFINITY" << endl;
-            //     } else {
-            //         cout << distances[i] << " and the path is: ";
-            //         stack<int> path;
-            //         int current = i;
-            //         while (current != -1) {
-            //             path.push(current);
-            //             current = predecessors[current];
-            //         }
-            //         while (!path.empty()) {
-            //             cout << path.top() << " ";
-            //             path.pop();
-            //         }
-            //         cout << endl;
-            //     }
-            // }
-            
-            // cout << "from " << currentMsgInfo->src << "to " << currentMsgInfo->dest << "hops ";
-
+            dijkstra(currentMsgInfo->src);
+            int n = distances.size();
+            if (distances[currentMsgInfo->dest] == INF) {
+                cout << "from " << currentMsgInfo->src << " to " << currentMsgInfo->dest << " cost infinite hops unreachable message " << currentMsgInfo->message << endl;
+            } else {
+                cout << "from " << currentMsgInfo->src << " to " << currentMsgInfo->dest << " cost " << distances[currentMsgInfo->dest] << " hops ";
+                stack<int> path;
+                int current = currentMsgInfo->dest;
+                while (current != -1) {
+                    path.push(current);
+                    current = predecessors[current];
+                }
+                while (!path.empty()) {
+                    cout << path.top() << " ";
+                    path.pop();
+                    if (path.size() == 1){
+                        path.pop();
+                    }
+                }
+                cout << "message " << currentMsgInfo->message << endl;
+            }
+            currentMsgInfo = currentMsgInfo->next;
         }
+        return;
     }
 };
 
 int main() {
     // Establish Graph and add edges.
     Graph graph;
-    // for (int i = 0; i < 6; ++i) {
-    //     graph.nodes.push_back(Node(i));
-    // }
-
-    // graph.addUndirectedEdge(0, 1, 2);
-    // graph.addUndirectedEdge(0, 4, 5);
-    // graph.addUndirectedEdge(1, 2, 1);
-    // graph.addUndirectedEdge(1, 3, 7);
-    // graph.addUndirectedEdge(2, 4, 2);
-    // graph.addUndirectedEdge(3, 5, 3);
-    // graph.addUndirectedEdge(4, 5, 1);
     graph.initGraph("./topofile","./changesfile","./Messagefile");
-
-    int start_node = 2;
-
-    graph.dijkstra(start_node);
-    graph.printForwardingTable(2);
-
-    // print out the shortest path.
-    // graph.printShortestPaths(start_node);
+    graph.printMsgTrans();
 
     return 0;
 }
